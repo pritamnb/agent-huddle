@@ -83,6 +83,10 @@ struct Session: Identifiable {
     var updatedAt = Date()
 
     var project = ""
+    /// The agent's process id, when known (from Claude Code's session records).
+    var pid: Int32 = 0
+    /// Whether this session's hooks have reported anything; without hooks there is no timeline.
+    var hooked = false
     /// The desktop app's own id for this session (local_...), used for its deep link.
     var hostSession = ""
     var name: String {
@@ -190,6 +194,7 @@ final class HuddleStore: ObservableObject {
 
         update(sid) { s in
             s.agent = agent
+            s.hooked = true
             // Cursor runs user hooks from ~/.cursor, so fall back to its bundle id for jumping.
             if agent == .cursor, s.bundleID.isEmpty, (req.headers["x-huddle-term"] ?? "").isEmpty {
                 s.bundleID = "com.todesktop.230313mzl4w4u92"
@@ -331,6 +336,39 @@ final class HuddleStore: ObservableObject {
     func record(_ p: PendingRequest, _ cause: String) {
         update(p.sessionID) { $0.steps.append(Step(icon: "info.circle", title: cause)) }
         HuddleConfig.log("\(session(p.sessionID)?.name ?? p.sessionID) \(p.toolName): \(cause)")
+    }
+
+    /// Merges Claude Code's own session records: adds running sessions the hooks haven't
+    /// reported, keeps statuses current, and ends sessions whose process has gone.
+    func applyDiscovered(_ found: [DiscoveredSession]) {
+        let live = Set(found.map(\.id))
+        for d in found {
+            let isNew = session(d.id) == nil
+            update(d.id) { s in
+                s.pid = d.pid
+                if s.cwd.isEmpty { s.cwd = d.cwd }
+                if !d.name.isEmpty { s.title = d.name }
+                if s.hostSession.isEmpty { s.hostSession = d.hostSession }
+                if s.bundleID.isEmpty { s.bundleID = d.bundleID }
+                if s.term.isEmpty { s.term = d.term }
+                if s.tty.isEmpty { s.tty = d.tty }
+                // Claude Code's own busy/idle is the truth for sessions without hooks; with
+                // hooks, keep the finer status they give (e.g. waiting on you).
+                if !s.hooked || s.status == .ended { s.status = d.status }
+                if isNew, !s.hooked {
+                    s.steps.append(Step(icon: "eye", title: "Found running",
+                                        detail: "Started before Agent Huddle's hooks were installed: restart it to see its steps and answer its prompts here."))
+                }
+            }
+        }
+        // Discovered sessions whose process is gone: ended.
+        for s in sessions where s.agent == .claude && s.pid != 0 && !live.contains(s.id) && s.status != .ended {
+            update(s.id) { $0.status = .ended }
+            let id = s.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak self] in
+                if self?.session(id)?.status == .ended { self?.crossOff(id) }
+            }
+        }
     }
 
     private func update(_ id: String, _ change: (inout Session) -> Void) {

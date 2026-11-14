@@ -34,7 +34,7 @@ it without hunting for the right window.
 | Sessions and timeline | ✅ | ✅ | ✅ (tools appear once they finish) |
 | Allow / deny from the widget | ✅ only for actions it would ask you about | ✅ only for actions it would ask you about | Opt-in with `--approvals`: every shell command and MCP call |
 | Answer its questions | ✅ | Shown as "needs you"; answer in Codex | Not visible to hooks |
-| Jump to the session | Desktop app: the exact session · Terminal/iTerm: the exact tab | Codex app: the exact thread · Terminal/iTerm: the exact tab | The Cursor window with the project open |
+| Jump to the session | Desktop app: the exact session · Herdr: the exact tab · Terminal/iTerm: the exact tab | Codex app: the exact thread · Terminal/iTerm: the exact tab | The Cursor window with the project open |
 
 Why the differences: Claude Code and Codex fire a hook only when they're about to show
 their own approval prompt, so the widget sees exactly the prompts you would. Cursor's hooks
@@ -137,12 +137,15 @@ lines in the installer.
 ## Limits
 
 - In VS Code, Cursor and similar editors, jump reaches the window, not the chat inside it.
-  Terminals other than Terminal and iTerm2 (Ghostty, Warp, Herdr, …) are only brought to the
-  front. Hover over a session's jump button to see what it will do, and every jump is logged
+  In Herdr, jump switches to the session's tab. Other terminals (Ghostty, Warp, …) are only
+  brought to the front. Hover over a session's jump button to see what it will do, and every jump is logged
   in `~/.agent-huddle/huddle.log`.
 - Claude desktop app sessions are matched to the app's own records to open the exact
   session and show its real title; this reads the app's local session files.
-- Sessions that were already running show up on their next step, not right away.
+- Claude Code sessions are found from Claude Code's own records (`~/.claude/sessions`), so
+  every running session is listed right away, even one started before the hooks were
+  installed. Such a session shows its status and can be jumped to, but has no timeline or
+  prompts until it's restarted. Codex and Cursor sessions appear on their first hook event.
 - Ended sessions clear themselves after two minutes.
 - Hook formats change between agent versions; the adapters target the formats published
   in November 2026.

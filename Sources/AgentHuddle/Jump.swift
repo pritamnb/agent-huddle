@@ -26,6 +26,7 @@ enum Jumper {
         if s.term == "iTerm.app", !s.tty.isEmpty { return "Switch to its iTerm tab" }
         if s.agent == .codex, ["com.openai.codex", "com.openai.chat"].contains(s.hostBundle) { return "Open this thread in Codex" }
         if s.agent == .claude, s.hostBundle == desktopApp || s.hostBundle.isEmpty { return "Open this session in Claude" }
+        if s.hostBundle == herdrApp { return "Switch to its Herdr tab" }
         if editors.contains(s.hostBundle) { return "Bring its editor window to the front" }
         if !s.hostBundle.isEmpty {
             let name = NSWorkspace.shared.urlForApplication(withBundleIdentifier: s.hostBundle)
@@ -37,6 +38,7 @@ enum Jumper {
 
     /// Describes how jump reaches a session, for the log.
     static func method(for s: Session) -> String {
+        if s.hostBundle == herdrApp { return "Herdr terminal running pid \(s.pid)" }
         if s.term == "Apple_Terminal", !s.tty.isEmpty { return "Terminal tab \(s.tty)" }
         if s.term == "iTerm.app", !s.tty.isEmpty { return "iTerm tab \(s.tty)" }
         if s.agent == .codex, ["com.openai.codex", "com.openai.chat"].contains(s.hostBundle) { return "codex://threads/\(s.id)" }
@@ -46,7 +48,30 @@ enum Jumper {
         return "nothing known to open"
     }
 
+    static let herdrApp = "dev.herdr.app"
+
+    /// Herdr: find the Herdr terminal running this agent, then ask Herdr to focus it.
+    private static func jumpInHerdr(_ s: Session) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let app = FileManager.default.homeDirectoryForCurrentUser.path + "/.local/bin/herdr-app"
+            var pid = s.pid
+            if pid == 0, let d = Discovery.scan(known: []).first(where: { $0.id == s.id }) { pid = d.pid }
+            let address = pid == 0 ? nil : Discovery.herdrTerminal(running: pid)?.address
+            if let address {
+                Discovery.run(app, ["do", "pane.focus", "--terminal", address])
+                HuddleConfig.log("jump \(s.name): Herdr terminal \(address)")
+            } else {
+                HuddleConfig.log("jump \(s.name): no Herdr terminal runs pid \(pid); bringing Herdr forward")
+            }
+            DispatchQueue.main.async { run("/usr/bin/open", ["-b", herdrApp]) }
+        }
+    }
+
     private static func perform(_ s: Session) {
+        if s.hostBundle == herdrApp {
+            jumpInHerdr(s)
+            return
+        }
         let tty = s.tty.isEmpty ? "" : "/dev/" + s.tty
         if s.term == "Apple_Terminal", !tty.isEmpty {
             osascript("""

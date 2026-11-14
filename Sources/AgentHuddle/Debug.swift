@@ -19,7 +19,7 @@ extension AppDelegate {
                 "selected": store.selected ?? "",
                 "frontmost": store.frontmostBundle(),
                 "sessions": store.sessions.map { s in
-                    ["id": s.id, "agent": s.agent.rawValue, "name": s.name, "cwd": s.cwd, "project": s.project, "hostSession": s.hostSession, "host": s.hostBundle,
+                    ["id": s.id, "agent": s.agent.rawValue, "name": s.name, "cwd": s.cwd, "project": s.project, "hostSession": s.hostSession, "pid": s.pid, "hooked": s.hooked, "host": s.hostBundle,
                      "term": s.term, "tty": s.tty, "status": store.status(of: s).label,
                      "steps": s.steps.map { "\($0.state) | \($0.title) | \($0.detail.prefix(80))" }]
                 },

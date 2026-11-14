@@ -15,6 +15,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var hosting: NSHostingView<AnyView>!
     var sizeWatch: AnyCancellable?
     var lastDown: Date?
+    var discoveryTimer: Timer?
+    private var discovering = false
+
+    func discover() {
+        guard !discovering else { return }
+        discovering = true
+        let known = Set(store.sessions.filter { !$0.bundleID.isEmpty || !$0.term.isEmpty }.map(\.id))
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let found = Discovery.scan(known: known)
+            DispatchQueue.main.async {
+                self?.store.applyDiscovered(found)
+                self?.discovering = false
+            }
+        }
+    }
     var debugClick = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -86,6 +101,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let f = self?.panel.frame else { return }
             UserDefaults.standard.set([Double(f.maxX), Double(f.minY)], forKey: "corner")
         }
+
+        // Every few seconds, pick up running Claude Code sessions from their own records.
+        discoveryTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.discover() }
+        discover()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "person.3.fill", accessibilityDescription: "Agent Huddle")
