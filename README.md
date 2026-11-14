@@ -106,3 +106,7 @@ put it. The menu bar icon brings it back to the corner or quits it.
 - Ended sessions clear themselves after two minutes.
 - Built and tested on macOS with Claude Code 2.1; hook formats may change between
   Claude Code versions.
+
+## License
+
+[MIT](LICENSE)
