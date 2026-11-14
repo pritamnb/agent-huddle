@@ -1,7 +1,7 @@
 import AppKit
 
 /// Token-guarded inspection endpoints so the widget can be checked without screen access:
-/// /debug/state, /debug/events, /debug/shot?path=, /debug/click?x=&y= (top-left origin), /debug/open?id=.
+/// /debug/state, /debug/events, /debug/shot?path=, /debug/click?x=&y= (top-left origin), /debug/open?id=, /debug/crossoff?id=.
 extension AppDelegate {
     func debug(_ req: HookRequest, _ responder: HookResponder) {
         switch req.path {
@@ -30,6 +30,10 @@ extension AppDelegate {
             store.expanded = true
             store.selected = req.query["id"]
             responder.send("{\"opened\":true}")
+        case "/debug/crossoff":
+            // Removes a session, as its tick button would (scripted tests clean up with this).
+            if let id = req.query["id"] { store.crossOff(id) }
+            responder.send("{\"removed\":true}")
         case "/debug/events":
             responder.send(HuddleStore.json(["events": store.recent]))
         case "/debug/shot":
