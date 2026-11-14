@@ -1,7 +1,7 @@
 import AppKit
 
 /// Token-guarded inspection endpoints so the widget can be checked without screen access:
-/// /debug/state, /debug/events, /debug/shot?path=, /debug/click?x=&y= (top-left origin).
+/// /debug/state, /debug/events, /debug/shot?path=, /debug/click?x=&y= (top-left origin), /debug/open?id=.
 extension AppDelegate {
     func debug(_ req: HookRequest, _ responder: HookResponder) {
         switch req.path {
@@ -12,6 +12,9 @@ extension AppDelegate {
                 "frame": [f.minX, f.minY, f.width, f.height],
                 "screenVisible": [screen.minX, screen.minY, screen.width, screen.height],
                 "visible": panel.isVisible,
+                "key": panel.isKeyWindow,
+                "notice": store.notice ?? "",
+                "order": store.orderedSessions.map(\.name),
                 "expanded": store.expanded,
                 "selected": store.selected ?? "",
                 "frontmost": store.frontmostBundle(),
@@ -22,6 +25,11 @@ extension AppDelegate {
                 },
                 "pending": store.pending.map { ["session": $0.sessionID, "tool": $0.toolName, "summary": $0.summary] },
             ]))
+        case "/debug/open":
+            // Opens a session's view, as a click on its row would (for scripted tests).
+            store.expanded = true
+            store.selected = req.query["id"]
+            responder.send("{\"opened\":true}")
         case "/debug/events":
             responder.send(HuddleStore.json(["events": store.recent]))
         case "/debug/shot":

@@ -40,10 +40,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard down.timeIntervalSince(request.created) > 0.7 else { return "clicked before the card had been visible for a moment" }
             return nil
         }
-        store.onAttention = { [weak self] in
-            self?.panel.orderFrontRegardless()
-            NSSound(named: "Tink")?.play()
-        }
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] note in
@@ -57,6 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = HuddlePanel(contentRect: NSRect(x: 0, y: 0, width: 160, height: 40),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true
+        // Clicking the widget never takes keyboard focus from the window you're working in.
+        panel.becomesKeyOnlyIfNeeded = true
         panel.level = .floating
         panel.backgroundColor = .clear
         panel.isOpaque = false

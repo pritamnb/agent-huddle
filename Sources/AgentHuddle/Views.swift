@@ -43,11 +43,13 @@ struct RootView: View {
                 if store.sessions.isEmpty {
                     Circle().fill(.gray).frame(width: 8, height: 8)
                 } else {
-                    ForEach(store.sessions.prefix(6)) { s in
+                    ForEach(store.orderedSessions.prefix(6)) { s in
                         Circle().fill(store.status(of: s).color).frame(width: 8, height: 8)
                     }
                 }
-                Text(pillText).font(.system(size: 12, weight: .medium))
+                Text(store.notice ?? pillText).font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(store.notice == nil ? Color.primary : Color.orange)
+                    .lineLimit(1).frame(maxWidth: 260, alignment: .leading).fixedSize()
             }
             .padding(.trailing, 12).padding(.vertical, 9)
             .contentShape(Rectangle())
@@ -79,7 +81,7 @@ struct RootView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
-                        ForEach(store.sessions) { s in
+                        ForEach(store.orderedSessions) { s in
                             SessionRow(session: s, open: { store.selected = s.id })
                         }
                     }
@@ -111,6 +113,15 @@ struct SessionRow: View {
     let session: Session
     let open: () -> Void
 
+    /// What the row is waiting on, when it's waiting on you; otherwise its latest step.
+    func subtitle(_ status: SessionStatus) -> String {
+        if let p = store.pending(for: session.id).first {
+            let what = p.isQuestion ? "Question: \(p.summary)" : "Allow \(p.toolName)? \(p.summary)"
+            return what.replacingOccurrences(of: "\n", with: " ")
+        }
+        return status == .needsYou ? "Needs you: \(session.activity)" : session.activity
+    }
+
     var body: some View {
         let status = store.status(of: session)
         HStack(spacing: 10) {
@@ -123,7 +134,7 @@ struct SessionRow: View {
                             Text(session.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
                             AgentTag(agent: session.agent)
                         }
-                        Text(status == .needsYou ? "Needs you: \(session.activity)" : session.activity)
+                        Text(subtitle(status))
                             .font(.system(size: 11)).foregroundStyle(status == .needsYou ? .orange : .secondary)
                             .lineLimit(1)
                     }
@@ -132,7 +143,7 @@ struct SessionRow: View {
                 .frame(maxHeight: .infinity).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            IconButton("arrow.up.forward.app", help: "Jump to this session") { Jumper.jump(to: session) }
+            IconButton("arrow.up.forward.app", help: Jumper.help(for: session)) { Jumper.jump(to: session) }
             IconButton("checkmark", help: "Cross off") { store.crossOff(session.id) }
         }
         .padding(.horizontal, 12).frame(height: 52)
@@ -161,7 +172,7 @@ struct DetailView: View {
                         .lineLimit(1).truncationMode(.head)
                 }
                 Spacer(minLength: 4)
-                IconButton("arrow.up.forward.app", help: "Jump to this session") { Jumper.jump(to: session) }
+                IconButton("arrow.up.forward.app", help: Jumper.help(for: session)) { Jumper.jump(to: session) }
                 IconButton("checkmark", help: "Cross off") { store.crossOff(session.id); back() }
             }
             .padding(.horizontal, 10).padding(.vertical, 9)

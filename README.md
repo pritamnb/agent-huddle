@@ -13,8 +13,13 @@ it without hunting for the right window.
   you, blue waiting for your next message, grey ended.
 - **Step by step:** click a session to see its prompts, tool calls and results as they
   happen.
-- **Answer from the widget:** allow or deny permission requests and answer questions
-  without switching apps.
+- **Stays out of your way:** when an agent needs you, the pill shows a short note
+  ("api: allow Bash?") for a few seconds. It never pops open, plays sounds, or takes
+  keyboard focus from the window you're working in.
+- **Priority list:** sessions waiting on you are listed first, with what they're waiting
+  for; then working, then idle, then ended.
+- **Answer from the widget:** open a session to allow or deny its request or answer its
+  question, without switching apps.
 - **Jump or cross off:** open the session it came from, or tick it off when you're done.
 
 <p>
@@ -62,8 +67,9 @@ writes replies in that agent's format.
 ## Safety
 
 - **Clicks only:** a prompt is decided only by a real mouse click on Allow, Deny or Send
-  answer. The click must come at least 0.7 s after the card appeared, so a card that pops
-  up under your pointer can't be approved by accident. Anything else is ignored and logged.
+  answer. The click must come at least 0.7 s after the card appeared, so a card that
+  appears under your pointer can't be approved by accident. Anything else is ignored and
+  logged.
 - **Handing back never approves.** A prompt reaches the widget only when you are *not*
   already in the app running that session. If that app is in front, or you switch to it,
   or 90 seconds pass with no answer, the prompt goes back to the agent's own dialog. It
@@ -131,6 +137,11 @@ lines in the installer.
 ## Limits
 
 - In VS Code, Cursor and similar editors, jump reaches the window, not the chat inside it.
+  Terminals other than Terminal and iTerm2 (Ghostty, Warp, Herdr, …) are only brought to the
+  front. Hover over a session's jump button to see what it will do, and every jump is logged
+  in `~/.agent-huddle/huddle.log`.
+- Claude desktop app sessions are matched to the app's own records to open the exact
+  session and show its real title; this reads the app's local session files.
 - Sessions that were already running show up on their next step, not right away.
 - Ended sessions clear themselves after two minutes.
 - Hook formats change between agent versions; the adapters target the formats published

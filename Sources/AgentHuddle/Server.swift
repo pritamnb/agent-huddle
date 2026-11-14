@@ -119,6 +119,17 @@ final class HookServer {
 
 /// Port + shared secret, written where the hook script can read them.
 enum HuddleConfig {
+    /// Appends a line to ~/.agent-huddle/huddle.log.
+    static func log(_ message: String) {
+        let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
+        let url = dir.appendingPathComponent("huddle.log")
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile(); handle.write(Data(line.utf8)); try? handle.close()
+        } else {
+            try? line.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
     static let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agent-huddle")
 
     static func load() -> (port: UInt16, token: String) {

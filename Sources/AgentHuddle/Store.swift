@@ -115,8 +115,34 @@ final class HuddleStore: ObservableObject {
     @Published var selected: String?
     @Published var picks: [UUID: Set<String>] = [:]
 
-    /// Called when a prompt lands in the widget and needs the user's eyes.
-    var onAttention: (() -> Void)?
+    /// A short note shown in the collapsed pill for a few seconds, e.g. "api: allow Bash?".
+    @Published var notice: String?
+    private var noticeToken = UUID()
+
+    func notify(_ text: String) {
+        let token = UUID()
+        noticeToken = token
+        notice = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            if self?.noticeToken == token { self?.notice = nil }
+        }
+    }
+
+    /// Sessions in priority order: waiting on you first, then working, waiting for a new
+    /// message, ended. Order within a group stays as it was, so rows don't jump around.
+    var orderedSessions: [Session] {
+        func rank(_ s: Session) -> Int {
+            switch status(of: s) {
+            case .needsYou: return 0
+            case .working: return 1
+            case .idle: return 2
+            case .ended: return 3
+            }
+        }
+        return sessions.enumerated()
+            .sorted { rank($0.element) != rank($1.element) ? rank($0.element) < rank($1.element) : $0.offset < $1.offset }
+            .map(\.element)
+    }
     /// Bundle id of the frontmost app, so prompts go to the session when the user is already in it.
     var frontmostBundle: () -> String = { "" }
     /// How long a prompt may sit in the widget before it is handed to the session.
@@ -135,6 +161,7 @@ final class HuddleStore: ObservableObject {
         return true
     }
     var recent: [[String: Any]] = []
+    private var lookedUp: Set<String> = []
 
     func session(_ id: String) -> Session? { sessions.first { $0.id == id } }
     func pending(for id: String) -> [PendingRequest] { pending.filter { $0.sessionID == id } }
@@ -172,9 +199,24 @@ final class HuddleStore: ObservableObject {
             if let b = req.headers["x-huddle-bundle"], !b.isEmpty { s.bundleID = b }
             if let t = req.headers["x-huddle-term"], !t.isEmpty { s.term = t }
             if let p = req.headers["x-huddle-project"], !p.isEmpty { s.project = p }
-            if let h = req.headers["x-huddle-host-session"], h.hasPrefix("local_") { s.hostSession = h }
+            // Only the desktop app's own hooks can report its session id; a CLI started from inside
+            // a desktop session inherits the variable, so ignore it there.
+            if let h = req.headers["x-huddle-host-session"], h.hasPrefix("local_"),
+               req.headers["x-huddle-bundle"] == Jumper.desktopApp { s.hostSession = h }
             if let t = req.headers["x-huddle-tty"], !t.isEmpty, !t.contains("?") { s.tty = t }
             s.updatedAt = Date()
+        }
+
+        // First sight of a Claude Code session: take its title (and id) from the desktop app's
+        // records, so sessions in the same folder don't all show the folder name.
+        if agent == .claude, !lookedUp.contains(sid) {
+            lookedUp.insert(sid)
+            if let record = DesktopSessions.record(forCLISession: sid) {
+                update(sid) { s in
+                    if s.title.isEmpty { s.title = record.title }
+                    if s.hostSession.isEmpty { s.hostSession = record.id }
+                }
+            }
         }
 
         // Blocking hooks: keep the connection open until the user decides.
@@ -207,14 +249,14 @@ final class HuddleStore: ObservableObject {
                 self.record(request, "\(request.agent.displayName) withdrew the prompt (decided in the session or by its own rules)")
             }
             pending.append(request)
-            expanded = true
-            selected = sid
-            onAttention?()
+            // Never open the widget or take focus: a short note in the pill is enough.
+            notify("\(session(sid)?.name ?? "A session"): \(isQuestion ? "has a question" : "allow \(tool)?")")
             scheduleHandOff(request)
             return
         }
 
         responder.send(handBack)
+        var needsNote = false
         update(sid) { s in
             switch event {
             case "SessionStart":
@@ -239,6 +281,7 @@ final class HuddleStore: ObservableObject {
                 let type = j["notification_type"] as? String ?? ""
                 if type == "permission_prompt" || type == "elicitation_dialog" || type == "agent_needs_input" {
                     s.status = .needsYou
+                    needsNote = true
                 } else if type == "idle_prompt" {
                     s.status = .idle
                 }
@@ -273,6 +316,7 @@ final class HuddleStore: ObservableObject {
             }
             if s.steps.count > 300 { s.steps.removeFirst(s.steps.count - 300) }
         }
+        if needsNote, let s = session(sid) { notify("\(s.name): needs you") }
         // The tool ran or the turn ended, so any prompt for it was answered elsewhere.
         if ["PostToolUse", "PostToolUseFailure", "Stop", "SessionEnd", "UserPromptSubmit"].contains(event) {
             for p in pending(for: sid) {
@@ -286,13 +330,7 @@ final class HuddleStore: ObservableObject {
     /// Every way a prompt card leaves the widget is written to the timeline and to huddle.log.
     func record(_ p: PendingRequest, _ cause: String) {
         update(p.sessionID) { $0.steps.append(Step(icon: "info.circle", title: cause)) }
-        let line = "\(ISO8601DateFormatter().string(from: Date())) \(session(p.sessionID)?.name ?? p.sessionID) \(p.toolName): \(cause)\n"
-        let url = HuddleConfig.dir.appendingPathComponent("huddle.log")
-        if let handle = try? FileHandle(forWritingTo: url) {
-            handle.seekToEndOfFile(); handle.write(Data(line.utf8)); try? handle.close()
-        } else {
-            try? line.write(to: url, atomically: true, encoding: .utf8)
-        }
+        HuddleConfig.log("\(session(p.sessionID)?.name ?? p.sessionID) \(p.toolName): \(cause)")
     }
 
     private func update(_ id: String, _ change: (inout Session) -> Void) {

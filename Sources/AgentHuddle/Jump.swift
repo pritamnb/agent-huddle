@@ -5,7 +5,48 @@ enum Jumper {
     static let editors = ["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.vscodium",
                           "com.todesktop.230313mzl4w4u92", "com.exafunction.windsurf"]
 
-    static func jump(to s: Session) {
+    static func jump(to session: Session) {
+        var s = session
+        // Claude desktop sessions: use the app's own id, looked up from its records if the
+        // hooks didn't report it, so the exact session opens.
+        if s.agent == .claude, s.hostBundle == desktopApp || s.hostBundle.isEmpty,
+           let local = DesktopSessions.localID(forCLISession: s.id) {
+            s.hostSession = local
+            s.bundleID = desktopApp
+        }
+        HuddleConfig.log("jump \(s.name) [\(s.id)]: \(method(for: s))")
+        perform(s)
+    }
+
+    static let desktopApp = "com.anthropic.claudefordesktop"
+
+    /// What the jump button will do, in plain words, for its tooltip.
+    static func help(for s: Session) -> String {
+        if s.term == "Apple_Terminal", !s.tty.isEmpty { return "Switch to its Terminal tab" }
+        if s.term == "iTerm.app", !s.tty.isEmpty { return "Switch to its iTerm tab" }
+        if s.agent == .codex, ["com.openai.codex", "com.openai.chat"].contains(s.hostBundle) { return "Open this thread in Codex" }
+        if s.agent == .claude, s.hostBundle == desktopApp || s.hostBundle.isEmpty { return "Open this session in Claude" }
+        if editors.contains(s.hostBundle) { return "Bring its editor window to the front" }
+        if !s.hostBundle.isEmpty {
+            let name = NSWorkspace.shared.urlForApplication(withBundleIdentifier: s.hostBundle)
+                .map { $0.deletingPathExtension().lastPathComponent } ?? s.hostBundle
+            return "Bring \(name) to the front (it can't open a specific session)"
+        }
+        return "Nothing to jump to: the session didn't say where it runs"
+    }
+
+    /// Describes how jump reaches a session, for the log.
+    static func method(for s: Session) -> String {
+        if s.term == "Apple_Terminal", !s.tty.isEmpty { return "Terminal tab \(s.tty)" }
+        if s.term == "iTerm.app", !s.tty.isEmpty { return "iTerm tab \(s.tty)" }
+        if s.agent == .codex, ["com.openai.codex", "com.openai.chat"].contains(s.hostBundle) { return "codex://threads/\(s.id)" }
+        if s.hostBundle == desktopApp, !s.hostSession.isEmpty { return "claude://code/continue?session=\(s.hostSession)" }
+        if editors.contains(s.hostBundle) { return "open -b \(s.hostBundle) \(s.project.isEmpty ? s.cwd : s.project)" }
+        if !s.hostBundle.isEmpty { return "activate \(s.hostBundle) only" }
+        return "nothing known to open"
+    }
+
+    private static func perform(_ s: Session) {
         let tty = s.tty.isEmpty ? "" : "/dev/" + s.tty
         if s.term == "Apple_Terminal", !tty.isEmpty {
             osascript("""
@@ -45,7 +86,7 @@ enum Jumper {
         } else if s.agent == .codex, ["com.openai.codex", "com.openai.chat"].contains(s.hostBundle) {
             // The Codex app opens a local thread by its id, which is the hook's session_id.
             run("/usr/bin/open", ["codex://threads/\(s.id)"])
-        } else if s.hostBundle == "com.anthropic.claudefordesktop", !s.hostSession.isEmpty {
+        } else if s.hostBundle == desktopApp, !s.hostSession.isEmpty {
             // The desktop app's own deep link opens this exact session.
             run("/usr/bin/open", ["claude://code/continue?session=\(s.hostSession)"])
         } else if editors.contains(s.hostBundle) {
