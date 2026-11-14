@@ -1,11 +1,11 @@
 # Agent Huddle
 
-A small always-on-top macOS widget that keeps an eye on every Claude Code session you have
-running, so you can see what each agent is doing and answer it without hunting for the
-right window.
+A small always-on-top macOS widget that keeps an eye on every coding agent you have running
+(**Claude Code**, **Codex** and **Cursor**), so you can see what each one is doing and answer
+it without hunting for the right window.
 
 <p>
-  <img src="docs/list.png" width="340" alt="The widget listing three sessions with their status">
+  <img src="docs/list.png" width="340" alt="The widget listing Claude Code, Cursor and Codex sessions with their status">
   <img src="docs/timeline.png" width="340" alt="One session's step-by-step timeline">
 </p>
 
@@ -13,57 +13,65 @@ right window.
   you, blue waiting for your next message, grey ended.
 - **Step by step:** click a session to see its prompts, tool calls and results as they
   happen.
-- **Answer from the widget:** allow or deny permission requests and answer Claude's
-  questions without switching apps.
-- **Jump or cross off:** open the exact session it came from, or tick it off when you're
-  done.
+- **Answer from the widget:** allow or deny permission requests and answer questions
+  without switching apps.
+- **Jump or cross off:** open the session it came from, or tick it off when you're done.
 
 <p>
-  <img src="docs/permission.png" width="340" alt="A permission request with Allow, Deny and Decide in session">
-  <img src="docs/question.png" width="340" alt="A question from Claude with selectable answers">
+  <img src="docs/permission.png" width="340" alt="A Codex permission request with Allow, Deny and Decide in session">
+  <img src="docs/question.png" width="340" alt="A question from Claude Code with selectable answers">
 </p>
+
+## Supported agents
+
+| | Claude Code | Codex | Cursor |
+|---|---|---|---|
+| Sessions and timeline | ✅ | ✅ | ✅ (tools appear once they finish) |
+| Allow / deny from the widget | ✅ only for actions it would ask you about | ✅ only for actions it would ask you about | Opt-in with `--approvals`: every shell command and MCP call |
+| Answer its questions | ✅ | Shown as "needs you"; answer in Codex | Not visible to hooks |
+| Jump to the session | Desktop app: the exact session · Terminal/iTerm: the exact tab | Codex app: the exact thread · Terminal/iTerm: the exact tab | The Cursor window with the project open |
+
+Why the differences: Claude Code and Codex fire a hook only when they're about to show
+their own approval prompt, so the widget sees exactly the prompts you would. Cursor's hooks
+run before *every* shell command and MCP call, with no way to tell which ones Cursor would
+have asked about, so Cursor approvals are off unless you turn them on. Codex and Cursor
+don't let a hook answer their questions.
+
+Only Claude Code has been tested end to end with the real app. The Codex and Cursor
+adapters follow their published hook formats (checked November 2026) and are tested with
+recorded-format events. Bug reports from real use are welcome.
 
 ## How it works
 
 ```
-Claude Code ──hook──▶ huddle-hook.sh ──HTTP (127.0.0.1)──▶ Agent Huddle.app
-            ◀──decision (allow / deny / answer / pass)────┘
+agent ──hook──▶ huddle-hook.sh ──HTTP (127.0.0.1)──▶ Agent Huddle.app
+      ◀──reply in the agent's own format────────────┘
 ```
 
-Claude Code [hooks](https://code.claude.com/docs/en/hooks) run `hooks/huddle-hook.sh` on
-each event. The script posts the event to the widget on `127.0.0.1:47821`. The server
-listens on loopback only and checks a random token that is created on first run in
-`~/.agent-huddle/headers`.
+Each agent's hooks run `hooks/huddle-hook.sh --agent <name>`, which posts the event to the
+widget on `127.0.0.1:47821`. The server listens on loopback only and checks a random token
+created on first run in `~/.agent-huddle/headers`. A small adapter per agent
+(`Sources/AgentHuddle/*Adapter.swift`) turns the agent's events into the widget's and
+writes replies in that agent's format.
 
-- **Activity** (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`,
-  `SessionEnd`, …) only updates the widget and returns at once.
-- **Permission requests** (`PermissionRequest`) and **questions** (`PreToolUse` on
-  `AskUserQuestion`) keep the hook open until you decide. The widget answers with the
-  hook's documented decision JSON.
-- **No widget, no change:** if the app isn't running, the hook exits silently and Claude
-  Code behaves exactly as it would without it.
+- **Activity** events only update the widget and return at once.
+- **Permission requests** and **questions** keep the hook open until you decide.
+- **No widget, no change:** if the app isn't running, the hook prints each agent's
+  "carry on as normal" reply and the agent behaves as if Agent Huddle weren't there.
 
 ## Safety
 
-- **Clicks only:** a prompt is approved only by a real mouse click on Allow, Deny or Send
+- **Clicks only:** a prompt is decided only by a real mouse click on Allow, Deny or Send
   answer. The click must come at least 0.7 s after the card appeared, so a card that pops
   up under your pointer can't be approved by accident. Anything else is ignored and logged.
-- **You stay in control of where prompts go:** a prompt reaches the widget only when you
-  are *not* already in the app hosting that session. If that app is in front, or you
-  switch to it, or 90 seconds pass with no answer, the prompt goes back to the session's
-  own dialog. It never moves while your pointer is over the widget.
+- **Handing back never approves.** A prompt reaches the widget only when you are *not*
+  already in the app running that session. If that app is in front, or you switch to it,
+  or 90 seconds pass with no answer, the prompt goes back to the agent's own dialog. It
+  never moves while your pointer is over the widget.
 - **Audit trail:** every way a card leaves the widget is recorded in the session's
   timeline and in `~/.agent-huddle/huddle.log`.
-- **Permission modes still apply:** sessions in Claude Code's auto mode approve tool calls
-  themselves, so their requests never reach the widget.
-
-## Jumping to a session
-
-| Where the session runs | What jump does |
-|---|---|
-| Claude desktop app | Opens that exact session with the app's `claude://code/continue` link |
-| Terminal / iTerm2 | Selects the exact tab, matched by its tty |
-| VS Code, Cursor, Windsurf | Focuses the window with the project folder open |
+- **Agents' own rules still apply:** a session in an auto-approve mode decides for itself,
+  and its requests never reach the widget.
 
 ## Install
 
@@ -74,38 +82,59 @@ git clone https://github.com/pritamnb/agent-huddle.git
 cd agent-huddle
 sh scripts/build-app.sh            # builds AgentHuddle.app
 open AgentHuddle.app
-python3 scripts/hooks.py install   # adds the hooks to ~/.claude/settings.json, with a backup
 ```
 
-Sessions appear on their next step once the hooks are installed. To remove the hooks:
+Then add the hooks for the agents you use. Each command backs the config file up first and
+keeps any hooks you already have.
 
 ```bash
-python3 scripts/hooks.py uninstall
+python3 scripts/hooks.py install                                 # Claude Code: ~/.claude/settings.json
+python3 scripts/hooks.py install --agent codex                   # Codex: ~/.codex/hooks.json
+python3 scripts/hooks.py install --agent cursor                  # Cursor: ~/.cursor/hooks.json
+python3 scripts/hooks.py install --agent cursor --approvals      # Cursor, with approvals
 ```
 
-Drag the widget by the grip on the pill or by the panel background; it remembers where you
-put it. The menu bar icon brings it back to the corner or quits it.
+Codex runs new hooks only after you trust them: run `/hooks` in the Codex CLI, or open
+Settings > Hooks in the Codex app.
+
+To remove them, run the same command with `uninstall`:
+
+```bash
+python3 scripts/hooks.py uninstall --agent codex
+```
+
+Sessions appear on their next step once the hooks are installed. Drag the widget by the
+grip on the pill or by the panel background; it remembers where you put it. The menu bar
+icon brings it back to the corner or quits it.
 
 ## Project layout
 
 | Path | What it does |
 |---|---|
+| `Sources/AgentHuddle/Adapters.swift` | The adapter interface, the event shape, and the Claude Code adapter |
+| `Sources/AgentHuddle/CodexAdapter.swift` | Codex hooks to widget events, and decisions back |
+| `Sources/AgentHuddle/CursorAdapter.swift` | Cursor hooks to widget events, and decisions back |
 | `Sources/AgentHuddle/Server.swift` | Loopback HTTP server that holds hook connections open |
 | `Sources/AgentHuddle/Store.swift` | Sessions, timelines, pending prompts and their decisions |
 | `Sources/AgentHuddle/Views.swift` | SwiftUI pill, list, timeline and prompt cards |
-| `Sources/AgentHuddle/Jump.swift` | Opening the window or tab a session lives in |
+| `Sources/AgentHuddle/Jump.swift` | Opening the window, tab or thread a session lives in |
 | `Sources/AgentHuddle/main.swift` | Floating panel, menu bar item, click guard |
 | `Sources/AgentHuddle/Debug.swift` | Token-guarded `/debug/*` endpoints for state, screenshots and test clicks |
-| `hooks/huddle-hook.sh` | The hook relay Claude Code runs |
+| `hooks/huddle-hook.sh` | The hook relay every agent runs |
 | `scripts/` | App build and hook install/uninstall |
+
+## Adding another agent
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). An adapter is usually one Swift file plus a few
+lines in the installer.
 
 ## Limits
 
-- In VS Code and similar editors, jump reaches the window, not the Claude tab inside it.
+- In VS Code, Cursor and similar editors, jump reaches the window, not the chat inside it.
 - Sessions that were already running show up on their next step, not right away.
 - Ended sessions clear themselves after two minutes.
-- Built and tested on macOS with Claude Code 2.1; hook formats may change between
-  Claude Code versions.
+- Hook formats change between agent versions; the adapters target the formats published
+  in November 2026.
 
 ## License
 

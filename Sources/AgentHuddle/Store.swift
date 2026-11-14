@@ -50,11 +50,17 @@ final class PendingRequest: Identifiable {
     let toolInput: [String: Any]
     let questions: [Question]
     let responder: HookResponder
+    let agent: Agent
+    let raw: [String: Any]
+    let event: HuddleEvent
     let created = Date()
     var isQuestion: Bool { !questions.isEmpty }
 
     init(sessionID: String, toolName: String, summary: String, toolInput: [String: Any],
-         questions: [Question], responder: HookResponder) {
+         questions: [Question], responder: HookResponder, agent: Agent, raw: [String: Any], event: HuddleEvent) {
+        self.agent = agent
+        self.raw = raw
+        self.event = event
         self.sessionID = sessionID
         self.toolName = toolName
         self.summary = summary
@@ -68,6 +74,7 @@ struct Session: Identifiable {
     let id: String
     var cwd: String
     var title: String
+    var agent: Agent = .claude
     var bundleID = ""
     var term = ""
     var tty = ""
@@ -137,19 +144,29 @@ final class HuddleStore: ObservableObject {
     // MARK: Incoming hook events
 
     func handle(_ req: HookRequest, _ responder: HookResponder) {
-        let j = req.json
-        guard let sid = j["session_id"] as? String, let event = j["hook_event_name"] as? String else {
-            responder.send("")
+        let agent = Agent(header: req.headers["x-huddle-agent"])
+        let raw = req.json
+        recent.append(["headers": req.headers.filter { $0.key.hasPrefix("x-huddle-") && $0.key != "x-huddle-token" },
+                       "json": raw])
+        // Anything the widget can't use gets the agent's "carry on as normal" reply.
+        guard let j = agent.adapter.normalize(raw),
+              let sid = j["session_id"] as? String, !sid.isEmpty,
+              let event = j["hook_event_name"] as? String else {
+            responder.send(agent.adapter.reply(.handBack, raw: raw, event: [:]))
             return
         }
+        let handBack = agent.adapter.reply(.handBack, raw: raw, event: j)
         let wait = req.headers["x-huddle-wait"] == "1"
-        recent.append(["headers": req.headers.filter { $0.key.hasPrefix("x-huddle-") && $0.key != "x-huddle-token" },
-                       "json": j])
         if recent.count > 150 { recent.removeFirst(recent.count - 150) }
         let tool = j["tool_name"] as? String ?? ""
         let input = j["tool_input"] as? [String: Any] ?? [:]
 
         update(sid) { s in
+            s.agent = agent
+            // Cursor runs user hooks from ~/.cursor, so fall back to its bundle id for jumping.
+            if agent == .cursor, s.bundleID.isEmpty, (req.headers["x-huddle-term"] ?? "").isEmpty {
+                s.bundleID = "com.todesktop.230313mzl4w4u92"
+            }
             if let cwd = j["cwd"] as? String, !cwd.isEmpty { s.cwd = cwd }
             if let t = j["session_title"] as? String, !t.isEmpty { s.title = t }
             if let b = req.headers["x-huddle-bundle"], !b.isEmpty { s.bundleID = b }
@@ -165,13 +182,13 @@ final class HuddleStore: ObservableObject {
             let isQuestion = tool == "AskUserQuestion"
             // Questions are answered from PreToolUse; everything else from PermissionRequest.
             guard (event == "PreToolUse" && isQuestion) || (event == "PermissionRequest" && !isQuestion) else {
-                responder.send("")
+                responder.send(handBack)
                 return
             }
             // The user is already looking at the session's app: let it show its own prompt.
             let host = session(sid)?.hostBundle ?? ""
             if !host.isEmpty, host == frontmostBundle() {
-                responder.send("")
+                responder.send(handBack)
                 update(sid) { s in
                     s.status = .needsYou
                     s.steps.append(Step(icon: isQuestion ? "questionmark.bubble" : "hand.raised",
@@ -182,11 +199,12 @@ final class HuddleStore: ObservableObject {
             }
             let request = PendingRequest(
                 sessionID: sid, toolName: tool, summary: Self.summary(tool, input), toolInput: input,
-                questions: isQuestion ? Self.questions(input) : [], responder: responder)
+                questions: isQuestion ? Self.questions(input) : [], responder: responder,
+                agent: agent, raw: raw, event: j)
             responder.onClose = { [weak self, weak request] in
                 guard let self, let request else { return }
                 self.pending.removeAll { $0.id == request.id }
-                self.record(request, "Claude Code withdrew the prompt (decided in the session or by its permission mode)")
+                self.record(request, "\(request.agent.displayName) withdrew the prompt (decided in the session or by its own rules)")
             }
             pending.append(request)
             expanded = true
@@ -196,7 +214,7 @@ final class HuddleStore: ObservableObject {
             return
         }
 
-        responder.send("")
+        responder.send(handBack)
         update(sid) { s in
             switch event {
             case "SessionStart":
@@ -230,6 +248,17 @@ final class HuddleStore: ObservableObject {
                 for i in s.steps.indices where s.steps[i].state == .running { s.steps[i].state = .done }
                 s.steps.append(Step(icon: "checkmark.circle", title: "Finished its turn",
                                     detail: j["last_assistant_message"] as? String ?? ""))
+            case "ToolRan":
+                // Agents that only report finished tools (Cursor): one completed step.
+                s.status = .working
+                var detail = Self.summary(tool, input)
+                if !s.cwd.isEmpty, detail.hasPrefix(s.cwd + "/") { detail.removeFirst(s.cwd.count + 1) }
+                s.steps.append(Step(icon: Self.icon(tool), title: tool, detail: detail,
+                                    state: (j["failed"] as? Bool ?? false) ? .failed : .done))
+            case "AgentMessage":
+                if let text = j["message"] as? String, !text.isEmpty {
+                    s.steps.append(Step(icon: "text.bubble", title: "Replied", detail: text))
+                }
             case "SubagentStop":
                 s.steps.append(Step(icon: "person.2", title: "Subagent finished"))
             case "SessionEnd":
@@ -247,7 +276,7 @@ final class HuddleStore: ObservableObject {
         // The tool ran or the turn ended, so any prompt for it was answered elsewhere.
         if ["PostToolUse", "PostToolUseFailure", "Stop", "SessionEnd", "UserPromptSubmit"].contains(event) {
             for p in pending(for: sid) {
-                p.responder.send("")
+                p.responder.send(p.agent.adapter.reply(.handBack, raw: p.raw, event: p.event))
                 record(p, "Prompt closed: the session moved on (\(event))")
             }
             pending.removeAll { $0.sessionID == sid }
@@ -280,30 +309,22 @@ final class HuddleStore: ObservableObject {
 
     func allow(_ p: PendingRequest) {
         guard deliberate(p, "Allow") else { return }
-        finish(p, Self.json(["hookSpecificOutput": ["hookEventName": "PermissionRequest",
-                                                    "decision": ["behavior": "allow"]]]), note: "You allowed \(p.toolName)")
+        finish(p, .allow, note: "You allowed \(p.toolName)")
     }
 
     func deny(_ p: PendingRequest) {
         guard deliberate(p, "Deny") else { return }
-        finish(p, Self.json(["hookSpecificOutput": [
-            "hookEventName": "PermissionRequest",
-            "decision": ["behavior": "deny", "message": "The user denied this from Agent Huddle."]]]),
-               note: "You denied \(p.toolName)")
+        finish(p, .deny, note: "You denied \(p.toolName)")
     }
 
     func answer(_ p: PendingRequest, _ answers: [String: String]) {
         guard deliberate(p, "Send answer") else { return }
-        var input = p.toolInput
-        input["answers"] = answers
-        finish(p, Self.json(["hookSpecificOutput": ["hookEventName": "PreToolUse", "permissionDecision": "allow",
-                                                    "updatedInput": input]]),
-               note: "You answered: " + answers.values.sorted().joined(separator: "; "))
+        finish(p, .answer(answers), note: "You answered: " + answers.values.sorted().joined(separator: "; "))
     }
 
-    /// Hand the prompt back to Claude Code's own dialog.
+    /// Hand the prompt back to the agent's own dialog.
     func passThrough(_ p: PendingRequest, cause: String = "You chose to decide in the session") {
-        finish(p, "", note: nil)
+        finish(p, .handBack, note: nil)
         record(p, cause)
         update(p.sessionID) { $0.status = .needsYou }
     }
@@ -327,17 +348,16 @@ final class HuddleStore: ObservableObject {
         for p in pending where session(p.sessionID)?.hostBundle == bundle { passThrough(p, cause: "Handed to the session: you switched to its app") }
     }
 
-    private func finish(_ p: PendingRequest, _ body: String, note: String?) {
-        p.responder.send(body)
+    private func finish(_ p: PendingRequest, _ decision: Decision, note: String?) {
+        p.responder.send(p.agent.adapter.reply(decision, raw: p.raw, event: p.event))
         pending.removeAll { $0.id == p.id }
         if let note { record(p, note + " (button click)") }
-        update(p.sessionID) { s in
-            if !body.isEmpty { s.status = .working }
-        }
+        if case .handBack = decision { return }
+        update(p.sessionID) { $0.status = .working }
     }
 
     func crossOff(_ id: String) {
-        for p in pending(for: id) { p.responder.send("") }
+        for p in pending(for: id) { p.responder.send(p.agent.adapter.reply(.handBack, raw: p.raw, event: p.event)) }
         pending.removeAll { $0.sessionID == id }
         sessions.removeAll { $0.id == id }
     }
@@ -371,7 +391,9 @@ final class HuddleStore: ObservableObject {
 
     static func icon(_ tool: String) -> String {
         switch tool {
-        case "Bash": return "terminal"
+        case "Bash", "Shell", "exec_command", "shell": return "terminal"
+        case "Delete": return "trash"
+        case "apply_patch": return "pencil"
         case "Read": return "doc.text"
         case "Edit", "Write", "NotebookEdit": return "pencil"
         case "Grep", "Glob": return "magnifyingglass"

@@ -42,6 +42,9 @@ enum Jumper {
               activate
             end tell
             """)
+        } else if s.agent == .codex, ["com.openai.codex", "com.openai.chat"].contains(s.hostBundle) {
+            // The Codex app opens a local thread by its id, which is the hook's session_id.
+            run("/usr/bin/open", ["codex://threads/\(s.id)"])
         } else if s.hostBundle == "com.anthropic.claudefordesktop", !s.hostSession.isEmpty {
             // The desktop app's own deep link opens this exact session.
             run("/usr/bin/open", ["claude://code/continue?session=\(s.hostSession)"])

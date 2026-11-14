@@ -119,7 +119,10 @@ struct SessionRow: View {
                 HStack(spacing: 10) {
                     Circle().fill(status.color).frame(width: 9, height: 9)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(session.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        HStack(spacing: 6) {
+                            Text(session.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                            AgentTag(agent: session.agent)
+                        }
                         Text(status == .needsYou ? "Needs you: \(session.activity)" : session.activity)
                             .font(.system(size: 11)).foregroundStyle(status == .needsYou ? .orange : .secondary)
                             .lineLimit(1)
@@ -150,7 +153,10 @@ struct DetailView: View {
                 IconButton("chevron.left", help: "All agents", action: back)
                 Circle().fill(store.status(of: session).color).frame(width: 9, height: 9)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(session.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(session.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                        AgentTag(agent: session.agent)
+                    }
                     Text(session.cwd).font(.system(size: 10)).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.head)
                 }
@@ -284,5 +290,25 @@ struct PendingCard: View {
             set = [label]
         }
         store.picks[q.id] = set
+    }
+}
+
+/// Small label naming the tool a session runs in.
+struct AgentTag: View {
+    let agent: Agent
+    var body: some View {
+        Text(agent.displayName)
+            .font(.system(size: 9, weight: .semibold))
+            .padding(.horizontal, 5).padding(.vertical, 1.5)
+            .background(Capsule().fill(color.opacity(0.25)))
+            .foregroundStyle(color)
+            .fixedSize()
+    }
+    var color: Color {
+        switch agent {
+        case .claude: return Color(red: 0.85, green: 0.47, blue: 0.34)
+        case .codex: return Color(red: 0.55, green: 0.75, blue: 1.0)
+        case .cursor: return Color(white: 0.85)
+        }
     }
 }
