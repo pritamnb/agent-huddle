@@ -1,5 +1,8 @@
 # Agent Huddle
 
+[![CI](https://github.com/pritamnb/agent-huddle/actions/workflows/ci.yml/badge.svg)](https://github.com/pritamnb/agent-huddle/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/pritamnb/agent-huddle)](https://github.com/pritamnb/agent-huddle/releases/latest)
+
 A small always-on-top macOS widget that keeps an eye on every coding agent you have running
 (**Claude Code**, **Codex** and **Cursor**), so you can see what each one is doing and answer
 it without hunting for the right window.
@@ -81,7 +84,9 @@ writes replies in that agent's format.
 
 ## Install
 
-Needs macOS 13 or later and the Swift toolchain (Xcode Command Line Tools are enough).
+**Download:** grab the latest `AgentHuddle-*.zip` from [Releases](https://github.com/pritamnb/agent-huddle/releases/latest), unzip it and move `AgentHuddle.app` to `/Applications`. The app isn't notarized, so on first launch right-click it and choose **Open** (or run `xattr -dr com.apple.quarantine /Applications/AgentHuddle.app`). Run the hook commands below from the unzipped folder.
+
+**Build from source:** needs macOS 13 or later and the Swift toolchain (Xcode Command Line Tools are enough).
 
 ```bash
 git clone https://github.com/pritamnb/agent-huddle.git

@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal app
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}" UNIVERSAL=1 sh scripts/build-app.sh
+          lipo -info AgentHuddle.app/Contents/MacOS/AgentHuddle
+      - name: Package
+        run: |
+          mkdir -p dist/AgentHuddle/scripts dist/AgentHuddle/hooks
+          cp -R AgentHuddle.app dist/AgentHuddle/
+          cp scripts/hooks.py dist/AgentHuddle/scripts/
+          cp hooks/huddle-hook.sh dist/AgentHuddle/hooks/
+          cp LICENSE README.md dist/AgentHuddle/
+          cd dist && ditto -c -k --keepParent AgentHuddle "AgentHuddle-${GITHUB_REF_NAME}.zip"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "dist/AgentHuddle-${GITHUB_REF_NAME}.zip" --title "Agent Huddle ${GITHUB_REF_NAME}" --notes-file docs/release-notes.md
